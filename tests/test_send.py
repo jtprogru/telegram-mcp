@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from telegram_mcp import tools
-from telegram_mcp.config import DEFAULT_SEND_ALLOWLIST, is_send_allowed, normalize_peer, parse_allowlist
+from telegram_mcp.config import DEFAULT_SEND_ALLOWLIST, BotDelivery, is_send_allowed, normalize_peer, parse_allowlist
 
 
 @pytest.mark.parametrize(
@@ -44,13 +44,18 @@ def test_is_send_allowed_ignores_decoration():
 
 
 CHANNEL = SimpleNamespace(broadcast=True, megagroup=False, username="jtprogru_channel", id=1)
-PERSON = SimpleNamespace(username="jtprogru", id=7)
+PERSON = SimpleNamespace(first_name="Иван", last_name="Петров", username="ivan", id=765, bot=False, is_self=False)
+SELF = SimpleNamespace(first_name="Михаил", last_name=None, username="jtprogru", id=1, bot=False, is_self=True)
+ROBOT = SimpleNamespace(first_name="Some", last_name=None, username="somebot", id=9, bot=True, is_self=False)
+DELIVERY = BotDelivery(token="123:ABC", connection_id="conn-1")
+WITH_PERSON = f"{DEFAULT_SEND_ALLOWLIST},ivan,somebot"
 
 
 class FakeClient:
     def __init__(self, entity):
         self.entity = entity
         self.sent = []
+        self.bot_sent = []
 
     async def get_entity(self, target):
         return self.entity
@@ -64,14 +69,20 @@ class FakeClient:
 def send_to(monkeypatch):
     """Point tg_send at a fake account and hand back the client that recorded the call."""
 
-    def wire(entity):
+    def wire(entity, *, delivery=None, allow=DEFAULT_SEND_ALLOWLIST):
         client = FakeClient(entity)
 
         async def get_client():
             return client
 
+        async def send_via_bot(token, connection_id, chat_id, text, parse_mode, link_preview):
+            client.bot_sent.append((token, connection_id, chat_id, text, parse_mode, link_preview))
+            return 4242
+
         monkeypatch.setattr(tools, "get_client", get_client)
-        monkeypatch.setattr(tools, "load_allowlist", allowlist)
+        monkeypatch.setattr(tools, "load_allowlist", lambda: parse_allowlist(allow))
+        monkeypatch.setattr(tools, "load_bot_delivery", lambda: delivery)
+        monkeypatch.setattr(tools.botapi, "send_message", send_via_bot)
         return client
 
     return wire
@@ -92,20 +103,20 @@ async def test_tg_send_posts_to_the_channel_unmarked(send_to):
 
 
 async def test_tg_send_marks_a_message_to_a_person(send_to):
-    client = send_to(PERSON)
+    client = send_to(SELF)
     result = await tools.tg_send("me", "проверка связи")
     assert client.sent == [("🤖 проверка связи", "md", False)]
     assert result == "sent [99] to me"
 
 
 async def test_tg_send_does_not_double_an_existing_marker(send_to):
-    client = send_to(PERSON)
+    client = send_to(SELF)
     await tools.tg_send("me", "🤖 уже помечено")
     assert client.sent == [("🤖 уже помечено", "md", False)]
 
 
 async def test_the_marker_can_be_changed_but_not_emptied(send_to, monkeypatch):
-    client = send_to(PERSON)
+    client = send_to(SELF)
     monkeypatch.setenv("TELEGRAM_MCP_AGENT_MARKER", "[agent]")
     await tools.tg_send("me", "hi")
     monkeypatch.setenv("TELEGRAM_MCP_AGENT_MARKER", "   ")
@@ -113,15 +124,59 @@ async def test_the_marker_can_be_changed_but_not_emptied(send_to, monkeypatch):
     assert client.sent == [("[agent] hi", "md", False), ("🤖 hi", "md", False)]
 
 
+async def test_a_message_to_a_person_goes_through_the_connected_bot(send_to):
+    client = send_to(PERSON, delivery=DELIVERY, allow=WITH_PERSON)
+    result = await tools.tg_send("@ivan", "буду через час")
+    assert client.bot_sent == [("123:ABC", "conn-1", 765, "🤖 буду через час", "md", False)]
+    assert client.sent == []
+    assert "via_business_bot_id set" in result
+
+
+async def test_the_marker_survives_the_bot_path(send_to):
+    """Protocol-level attribution is not a reason to drop the one a human can see."""
+    client = send_to(PERSON, delivery=DELIVERY, allow=WITH_PERSON)
+    await tools.tg_send("@ivan", "текст", parse_mode="html", link_preview=True)
+    assert client.bot_sent == [("123:ABC", "conn-1", 765, "🤖 текст", "html", True)]
+
+
+async def test_without_a_connected_bot_a_person_gets_the_account_itself(send_to):
+    client = send_to(PERSON, allow=WITH_PERSON)
+    await tools.tg_send("@ivan", "привет")
+    assert client.sent == [("🤖 привет", "md", False)]
+    assert client.bot_sent == []
+
+
+async def test_a_channel_post_never_takes_the_bot_path(send_to):
+    """A connected bot works in one-to-one chats only; a channel post has to stay on the session."""
+    client = send_to(CHANNEL, delivery=DELIVERY)
+    await tools.tg_send("@jtprogru_channel", "пост")
+    assert client.bot_sent == []
+    assert client.sent == [("пост", "md", False)]
+
+
+async def test_saved_messages_never_take_the_bot_path(send_to):
+    client = send_to(SELF, delivery=DELIVERY)
+    await tools.tg_send("me", "заметка")
+    assert client.bot_sent == []
+    assert client.sent == [("🤖 заметка", "md", False)]
+
+
+async def test_another_bot_is_not_a_business_chat(send_to):
+    client = send_to(ROBOT, delivery=DELIVERY, allow=WITH_PERSON)
+    await tools.tg_send("@somebot", "/start")
+    assert client.bot_sent == []
+    assert client.sent == [("🤖 /start", "md", False)]
+
+
 async def test_tg_send_rejects_an_unknown_parse_mode(send_to):
-    client = send_to(PERSON)
+    client = send_to(SELF)
     with pytest.raises(ValueError, match="parse_mode"):
         await tools.tg_send("me", "hi", parse_mode="rst")
     assert client.sent == []
 
 
 async def test_tg_send_rejects_empty_text(send_to):
-    client = send_to(PERSON)
+    client = send_to(SELF)
     with pytest.raises(ValueError, match="text is required"):
         await tools.tg_send("me", "   ")
     assert client.sent == []

@@ -15,10 +15,14 @@ KEYCHAIN_ACCOUNT = os.environ.get("USER", "")
 API_ID_SERVICE = "telegram-mcp-api-id"
 API_HASH_SERVICE = "telegram-mcp-api-hash"
 SESSION_SERVICE = "telegram-mcp-session"
+BOT_TOKEN_SERVICE = "telegram-mcp-bot-token"
+CONNECTION_SERVICE = "telegram-mcp-business-connection"
 
 API_ID_ENV = "TELEGRAM_MCP_API_ID"
 API_HASH_ENV = "TELEGRAM_MCP_API_HASH"
 SESSION_ENV = "TELEGRAM_MCP_SESSION"
+BOT_TOKEN_ENV = "TELEGRAM_MCP_BOT_TOKEN"
+CONNECTION_ENV = "TELEGRAM_MCP_BUSINESS_CONNECTION"
 ALLOWLIST_ENV = "TELEGRAM_MCP_SEND_ALLOWLIST"
 AGENT_MARKER_ENV = "TELEGRAM_MCP_AGENT_MARKER"
 
@@ -126,6 +130,41 @@ def load_api_credentials() -> tuple[int, str]:
         return int(api_id), api_hash
     except ValueError as exc:
         raise RuntimeError(f"{API_ID_SERVICE} is not a number: {api_id!r}") from exc
+
+
+@dataclass(frozen=True)
+class BotDelivery:
+    """A bot connected to the account through Telegram Business.
+
+    Messages sent this way carry via_business_bot_id, which is provenance at the
+    protocol level rather than a convention in the text.
+    """
+
+    token: str
+    connection_id: str
+
+
+def load_bot_token() -> str | None:
+    return _secret(BOT_TOKEN_SERVICE, BOT_TOKEN_ENV)
+
+
+def load_bot_delivery() -> BotDelivery | None:
+    """The bot delivery path, or None when it was never set up.
+
+    A token without a connection id is a half-finished setup, not a reason to
+    quietly fall back: it would send as the account itself and lose the very
+    attribution the bot was added for.
+    """
+    token = load_bot_token()
+    if not token:
+        return None
+    connection_id = _secret(CONNECTION_SERVICE, CONNECTION_ENV)
+    if not connection_id:
+        raise RuntimeError(
+            f"a bot token is stored in {BOT_TOKEN_SERVICE} but its business connection is not. "
+            "Run `make bot-connect` to fetch it, or remove the token to send as the account instead."
+        )
+    return BotDelivery(token=token, connection_id=connection_id)
 
 
 def load_settings() -> Settings:

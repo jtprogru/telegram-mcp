@@ -30,7 +30,16 @@ claude mcp add -s user telegram -- uv --directory ~/Work/github/jtprogru/telegra
 
 Use `-s project` instead if the server should only be available inside one project; that writes to `.mcp.json`, which is gitignored here. The first run may show a system dialog asking for Keychain access — that is `security` being called by the server, "Always Allow" is the answer.
 
-If the Keychain is unavailable (a headless launchd run, for example), the same three values are read from `TELEGRAM_MCP_API_ID`, `TELEGRAM_MCP_API_HASH` and `TELEGRAM_MCP_SESSION`. Two more variables tune behaviour rather than access: `TELEGRAM_MCP_SEND_ALLOWLIST` and `TELEGRAM_MCP_AGENT_MARKER`.
+**5. Connect a bot (optional).** Telegram Business, which needs Premium, lets you attach a bot to the account in Settings → Telegram Business → Chatbots. Messages this server sends to another person then go out through that bot and carry `via_business_bot_id`: Telegram's own record of who sent them, rather than a convention in the text. Take the token from @BotFather and fetch the connection:
+
+```bash
+security add-generic-password -a "$USER" -s telegram-mcp-bot-token -w "<bot token>"
+make bot-connect
+```
+
+`bot-connect` reads the connection id out of the bot's own update stream, because that is the only place it exists — the account can see *that* a bot is connected (`account.getConnectedBots`) but not under which id. If nothing arrives, toggle the bot off and on in Chatbots while the script is listening, and check that no webhook is set on the bot, since a webhook takes the updates instead.
+
+If the Keychain is unavailable (a headless launchd run, for example), the same three values are read from `TELEGRAM_MCP_API_ID`, `TELEGRAM_MCP_API_HASH` and `TELEGRAM_MCP_SESSION`. The bot path reads `TELEGRAM_MCP_BOT_TOKEN` and `TELEGRAM_MCP_BUSINESS_CONNECTION` the same way. Two more variables tune behaviour rather than access: `TELEGRAM_MCP_SEND_ALLOWLIST` and `TELEGRAM_MCP_AGENT_MARKER`.
 
 ## Tools
 
@@ -41,7 +50,7 @@ If the Keychain is unavailable (a headless launchd run, for example), the same t
 | `tg_history(peer, limit=50, min_id, max_id, since, until, full=False)` | Messages from any peer, `"me"` included |
 | `tg_search(query, peer=None, limit=30)` | Search inside one chat, or globally when `peer` is omitted |
 | `tg_message(link)` | One message by its `t.me/<channel>/<id>` link, untruncated |
-| `tg_send(peer, text, parse_mode="md", link_preview=False)` | Send. Allowlisted peers only, and marked when it goes to a person |
+| `tg_send(peer, text, parse_mode="md", link_preview=False)` | Send. Allowlisted peers only, marked, and routed through the connected bot when there is one |
 | `tg_download(peer, message_id, dest_dir)` | Save a message's media to disk |
 
 Output is compact on purpose — a channel with thousands of posts would otherwise fill a context window in a single call. One message renders as a header line plus its text, truncated to 500 characters:
@@ -68,6 +77,8 @@ Where a message has an author, the header says who: `from you` for this account,
 **Writes are fenced off in code.** `tg_send` compares the target against `TELEGRAM_MCP_SEND_ALLOWLIST` (default `jtprogru_channel,me`) and refuses anything else with a `PermissionError`, no matter who asks. The check runs before the client is even connected, so it holds when the session is broken too. Widening the list is a config change plus a restart.
 
 **Messages to people are marked as agent-sent.** Anything `tg_send` delivers to a private chat or a group is prefixed with 🤖 before it leaves, so the person reading it can tell how it was written without having to ask. The badge goes in front rather than at the end, where a notification preview would hide it, and it is applied in code — the agent cannot leave it out or talk its way past it. Posts to a broadcast channel are exempt: those are content authored by the channel, not a message from you to someone. Set `TELEGRAM_MCP_AGENT_MARKER` to use something other than 🤖; an empty value falls back to the default instead of switching the marking off.
+
+**Two delivery paths, one marker.** A message to another person goes through the connected bot when one is configured, and out of the account directly otherwise. Channel posts and Saved Messages always go directly: a business connection only covers one-to-one chats. The marker is applied before the path is chosen, so it rides along either way. Attribution the protocol records is no reason to drop the attribution a person can actually see, and a token that is half configured raises rather than quietly falling back to an unattributed send.
 
 **Everything that came from someone else is fenced as data:**
 

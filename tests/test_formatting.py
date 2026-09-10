@@ -12,6 +12,7 @@ from telegram_mcp.formatting import (
     format_views,
     forward_label,
     is_broadcast_channel,
+    is_private_person,
     mark_as_agent,
     media_label,
     parse_message_link,
@@ -221,3 +222,10 @@ def test_render_message_separates_own_saved_forwards_from_their_origin():
     """Saved Messages is entirely 'from you'; the origin of a forward is the only real authorship there."""
     forwarded = message(out=True, forward=SimpleNamespace(sender=None, chat=SimpleNamespace(title="Чужой канал")))
     assert render_message(forwarded).split("\n")[0] == "[4038] 2021-09-08 12:34 · from you · fwd from Чужой канал"
+
+
+def test_is_private_person_picks_out_a_real_one_to_one_chat():
+    assert is_private_person(person(first_name="Иван", id=765))
+    assert not is_private_person(person(first_name="Михаил", id=1, is_self=True))
+    assert not is_private_person(person(first_name="Some", id=9, bot=True))
+    assert not is_private_person(channel(username="jtprogru_channel"))

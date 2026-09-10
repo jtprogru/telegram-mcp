@@ -12,15 +12,17 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
-from telegram_mcp import __version__
+from telegram_mcp import __version__, botapi
+from telegram_mcp.botapi import BotAPIError
 from telegram_mcp.client import get_client, guard
-from telegram_mcp.config import is_send_allowed, load_allowlist, load_marker
+from telegram_mcp.config import is_send_allowed, load_allowlist, load_bot_delivery, load_marker
 from telegram_mcp.formatting import (
     MAX_MESSAGES,
     display_name,
     entity_link_prefix,
     fence,
     is_broadcast_channel,
+    is_private_person,
     mark_as_agent,
     parse_message_link,
     render_dialog,
@@ -85,7 +87,21 @@ async def tg_me() -> str:
     client = await get_client()
     me = await client.get_me()
     handle = f" (@{me.username})" if getattr(me, "username", None) else ""
-    return f"[{me.id}] {display_name(me)}{handle} — messages sent as this account read back as 'from you'"
+    lines = [f"[{me.id}] {display_name(me)}{handle} — messages sent as this account read back as 'from you'"]
+
+    try:
+        delivery = load_bot_delivery()
+    except RuntimeError as exc:  # a half-finished setup is worth reporting, not worth dying on
+        lines.append(f"bot delivery misconfigured: {exc}")
+        delivery = None
+    if delivery is None:
+        lines.append("messages to people go out as the account itself, marked in the text")
+    else:
+        try:
+            lines.append(f"messages to people go out through {await botapi.whoami(delivery.token)}")
+        except BotAPIError as exc:
+            lines.append(f"connected bot is configured but not answering: {exc}")
+    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -227,6 +243,10 @@ async def tg_send(peer: str, text: str, parse_mode: str = "md", link_preview: bo
     marker (🤖 by default) so the person receiving it can see it was sent with
     an agent's help. That happens in code and cannot be switched off from here,
     so do not write a marker of your own into the text.
+
+    A message to another person goes through the connected bot when one is set
+    up, which stamps via_business_bot_id on it; everything else is sent by the
+    account directly. Either way the marker is there.
     """
     allowlist = load_allowlist()
     if not is_send_allowed(peer, allowlist):
@@ -244,15 +264,22 @@ async def tg_send(peer: str, text: str, parse_mode: str = "md", link_preview: bo
 
     client = await get_client()
     entity = await client.get_entity(_peer(peer))
+    mode = modes[parse_mode.lower()]
     # A channel post is content authored by the channel; a message to a person is
     # from the account holder, and that is where the provenance has to be visible.
     body = text if is_broadcast_channel(entity) else mark_as_agent(text, load_marker())
-    sent = await client.send_message(
-        entity,
-        body,
-        parse_mode=modes[parse_mode.lower()],
-        link_preview=link_preview,
-    )
+
+    # A connected bot can only act in one-to-one chats with other people, and only
+    # there is it worth the detour: via_business_bot_id is Telegram's own record of
+    # who sent the message, which a marker in the text can never be.
+    delivery = load_bot_delivery() if is_private_person(entity) else None
+    if delivery is not None:
+        message_id = await botapi.send_message(
+            delivery.token, delivery.connection_id, entity.id, body, mode, link_preview
+        )
+        return f"sent [{message_id}] to {peer} through the connected bot, via_business_bot_id set"
+
+    sent = await client.send_message(entity, body, parse_mode=mode, link_preview=link_preview)
     prefix = entity_link_prefix(entity)
     location = f" {prefix}/{sent.id}" if prefix else ""
     return f"sent [{sent.id}] to {peer}{location}"

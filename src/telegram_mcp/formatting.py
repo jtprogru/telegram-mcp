@@ -69,6 +69,13 @@ def is_broadcast_channel(entity: Any) -> bool:
     return bool(getattr(entity, "broadcast", False))
 
 
+def is_private_person(entity: Any) -> bool:
+    """A one-to-one chat with somebody else — not a channel, not a bot, not yourself."""
+    if not hasattr(entity, "first_name"):
+        return False
+    return not (getattr(entity, "is_self", False) or getattr(entity, "bot", False))
+
+
 def mark_as_agent(text: str, marker: str) -> str:
     """Stamp an outgoing message so the person reading it knows an agent wrote it.
 
