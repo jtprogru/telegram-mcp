@@ -82,11 +82,65 @@ def mark_as_agent(text: str, marker: str) -> str:
     return f"{marker} {body}"
 
 
+def display_name(entity: Any) -> str:
+    """Human name of a user, group or channel; empty when there is nothing to show."""
+    if entity is None:
+        return ""
+    title = getattr(entity, "title", None)
+    if title:
+        return str(title)
+    names = (getattr(entity, "first_name", None), getattr(entity, "last_name", None))
+    return " ".join(name for name in names if name).strip()
+
+
+def sender_label(message: Any) -> str | None:
+    """Who wrote it, in a form the agent can act on.
+
+    Without this a group log or Saved Messages is a wall of anonymous text and
+    the account's own messages are indistinguishable from everyone else's. Own
+    messages read as 'you'; unsigned channel posts have no author at all and
+    stay bare.
+    """
+    if getattr(message, "out", False):
+        return "you"
+    author = getattr(message, "post_author", None)
+    if author:
+        return str(author)
+
+    sender = getattr(message, "sender", None)
+    name = display_name(sender)
+    username = getattr(sender, "username", None)
+    if name and username:
+        return f"{name} (@{username})"
+    if username:
+        return f"@{username}"
+    sender_id = getattr(sender, "id", None) or getattr(message, "sender_id", None)
+    if name:
+        return f"{name} ({sender_id})" if sender_id else name
+    return str(sender_id) if sender_id else None
+
+
+def forward_label(message: Any) -> str | None:
+    """Where a forward came from — the only real authorship signal in Saved Messages."""
+    forward = getattr(message, "forward", None)
+    if forward is None:
+        return None
+    origin = getattr(forward, "sender", None) or getattr(forward, "chat", None)
+    name = display_name(origin) or getattr(forward, "from_name", None)
+    return f"fwd from {name}" if name else "fwd"
+
+
 def render_message(message: Any, *, link_prefix: str | None = None, full: bool = False, chat: str | None = None) -> str:
     """One message as a header line plus its (by default truncated) text."""
     parts = [f"[{message.id}] {format_datetime(getattr(message, 'date', None))}"]
     if chat:
         parts.append(chat)
+    sender = sender_label(message)
+    if sender:
+        parts.append(f"from {sender}")
+    forwarded = forward_label(message)
+    if forwarded:
+        parts.append(forwarded)
     views = format_views(getattr(message, "views", None))
     if views:
         parts.append(f"{views} views")

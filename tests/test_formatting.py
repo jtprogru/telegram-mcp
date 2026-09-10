@@ -6,9 +6,11 @@ from telethon.extensions import markdown
 
 from telegram_mcp.formatting import (
     FENCE_TAG,
+    display_name,
     entity_link_prefix,
     fence,
     format_views,
+    forward_label,
     is_broadcast_channel,
     mark_as_agent,
     media_label,
@@ -16,6 +18,7 @@ from telegram_mcp.formatting import (
     render_dialog,
     render_message,
     render_messages,
+    sender_label,
     truncate,
 )
 
@@ -165,3 +168,56 @@ def test_is_broadcast_channel():
     assert is_broadcast_channel(channel(broadcast=True))
     assert not is_broadcast_channel(channel(broadcast=False, megagroup=True))
     assert not is_broadcast_channel(SimpleNamespace(username="jtprogru", id=7))
+
+
+def person(**kwargs):
+    return SimpleNamespace(**({"first_name": None, "last_name": None, "username": None, "id": None} | kwargs))
+
+
+def test_display_name_prefers_a_title_then_the_full_name():
+    assert display_name(SimpleNamespace(title="Канал")) == "Канал"
+    assert display_name(person(first_name="Иван", last_name="Петров")) == "Иван Петров"
+    assert display_name(person(first_name="Иван")) == "Иван"
+    assert display_name(person()) == ""
+    assert display_name(None) == ""
+
+
+def test_sender_label_names_the_account_itself():
+    assert sender_label(message(out=True)) == "you"
+
+
+def test_sender_label_combines_what_it_has():
+    assert sender_label(message(sender=person(first_name="Иван", last_name="Петров", username="ivan"))) == (
+        "Иван Петров (@ivan)"
+    )
+    assert sender_label(message(sender=person(first_name="Иван", id=765))) == "Иван (765)"
+    assert sender_label(message(sender=person(username="ivan"))) == "@ivan"
+    assert sender_label(message(sender=None, sender_id=765)) == "765"
+
+
+def test_sender_label_leaves_unsigned_channel_posts_bare():
+    assert sender_label(message()) is None
+
+
+def test_sender_label_uses_the_signature_of_a_signed_post():
+    assert sender_label(message(post_author="Mikhail")) == "Mikhail"
+
+
+def test_forward_label_reports_the_origin():
+    assert forward_label(message(forward=SimpleNamespace(sender=None, chat=SimpleNamespace(title="Канал")))) == (
+        "fwd from Канал"
+    )
+    hidden = SimpleNamespace(sender=None, chat=None, from_name="Кто-то")
+    assert forward_label(message(forward=hidden)) == "fwd from Кто-то"
+    assert forward_label(message()) is None
+
+
+def test_render_message_says_who_wrote_it():
+    rendered = render_message(message(sender=person(first_name="Иван", username="ivan")))
+    assert rendered.split("\n")[0] == "[4038] 2021-09-08 12:34 · from Иван (@ivan)"
+
+
+def test_render_message_separates_own_saved_forwards_from_their_origin():
+    """Saved Messages is entirely 'from you'; the origin of a forward is the only real authorship there."""
+    forwarded = message(out=True, forward=SimpleNamespace(sender=None, chat=SimpleNamespace(title="Чужой канал")))
+    assert render_message(forwarded).split("\n")[0] == "[4038] 2021-09-08 12:34 · from you · fwd from Чужой канал"

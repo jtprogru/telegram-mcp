@@ -51,6 +51,16 @@ Output is compact on purpose — a channel with thousands of posts would otherwi
 Дежурство, три часа ночи, OOM killer съел процесс…
 ```
 
+Where a message has an author, the header says who: `from you` for this account, `from Иван Петров (@ivan)` for anyone else, and `fwd from <origin>` for a forward — which in Saved Messages is the only authorship that means anything. Unsigned channel posts have no author and stay bare, so following a channel costs nothing extra.
+
+```
+[512] 2026-09-10 11:02 · from Иван Петров (@ivan)
+привет, ты на созвоне?
+
+[513] 2026-09-10 11:03 · from you
+🤖 на созвоне до 12:00, напишу как освобожусь
+```
+
 `full=True` drops the truncation, and no call ever returns more than 200 messages. To follow a channel incrementally, pass the highest id you already have as `min_id` instead of refetching from the top. All timestamps are UTC, and history comes back oldest first.
 
 ## Security

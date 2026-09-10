@@ -11,13 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
-from telethon import utils
 
 from telegram_mcp import __version__
 from telegram_mcp.client import get_client, guard
 from telegram_mcp.config import is_send_allowed, load_allowlist, load_marker
 from telegram_mcp.formatting import (
     MAX_MESSAGES,
+    display_name,
     entity_link_prefix,
     fence,
     is_broadcast_channel,
@@ -85,7 +85,7 @@ async def tg_me() -> str:
     client = await get_client()
     me = await client.get_me()
     handle = f" (@{me.username})" if getattr(me, "username", None) else ""
-    return f"[{me.id}] {utils.get_display_name(me)}{handle}"
+    return f"[{me.id}] {display_name(me)}{handle} — messages sent as this account read back as 'from you'"
 
 
 @mcp.tool()
@@ -190,7 +190,7 @@ async def tg_search(query: str, peer: str | None = None, limit: int = 30) -> str
     lines: list[str] = []
     async for message in client.iter_messages(None, search=query, limit=wanted):
         chat = getattr(message, "chat", None)
-        label = utils.get_display_name(chat) if chat else str(getattr(message, "chat_id", "?"))
+        label = display_name(chat) or str(getattr(message, "chat_id", "?"))
         lines.append(render_message(message, link_prefix=entity_link_prefix(chat), chat=label))
     body = "\n\n".join(lines) if lines else "(no matches)"
     return fence(body, peer="global-search")
