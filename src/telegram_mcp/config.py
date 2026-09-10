@@ -9,6 +9,7 @@ locked or unavailable.
 import os
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 KEYCHAIN_ACCOUNT = os.environ.get("USER", "")
 
@@ -165,6 +166,56 @@ def load_bot_delivery() -> BotDelivery | None:
             "Run `make bot-connect` to fetch it, or remove the token to send as the account instead."
         )
     return BotDelivery(token=token, connection_id=connection_id)
+
+
+SECRETARY_ENV = "TELEGRAM_SECRETARY_"
+DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_EFFORT = "medium"
+
+
+def _flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(SECRETARY_ENV + name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _number(name: str, default: int) -> int:
+    raw = os.environ.get(SECRETARY_ENV + name)
+    try:
+        return int(raw) if raw else default
+    except ValueError as exc:
+        raise RuntimeError(f"{SECRETARY_ENV}{name} must be a number, got {raw!r}") from exc
+
+
+@dataclass(frozen=True)
+class SecretaryConfig:
+    """Everything the daemon needs that is not a credential."""
+
+    owner: str
+    model: str
+    effort: str
+    marker: str
+    allow_irreversible: bool
+    history_messages: int
+    max_replies_per_hour: int
+    state_dir: Path
+
+    @classmethod
+    def from_env(cls) -> "SecretaryConfig":
+        return cls(
+            owner=os.environ.get(SECRETARY_ENV + "OWNER", "the account holder"),
+            model=os.environ.get(SECRETARY_ENV + "MODEL", DEFAULT_MODEL),
+            effort=os.environ.get(SECRETARY_ENV + "EFFORT", DEFAULT_EFFORT),
+            marker=load_marker(),
+            # Telegram's grant is the outer bound on what the bot may do; this is the
+            # inner one. Off by default: money and identity should not be reachable
+            # from a stranger's first message.
+            allow_irreversible=_flag("IRREVERSIBLE"),
+            history_messages=_number("HISTORY", 24),
+            max_replies_per_hour=_number("MAX_REPLIES_PER_HOUR", 20),
+            state_dir=Path(os.environ.get(SECRETARY_ENV + "STATE_DIR", "~/.local/state/telegram-mcp")).expanduser(),
+        )
 
 
 def load_settings() -> Settings:

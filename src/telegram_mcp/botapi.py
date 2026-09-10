@@ -11,6 +11,7 @@ and its HTML serializer mangles code blocks, so translating offsets is the only
 lossless route.
 """
 
+import logging
 from typing import Any
 
 import httpx
@@ -20,6 +21,12 @@ from telegram_mcp.client import ToolRuntimeError
 
 API_BASE = "https://api.telegram.org"
 _TIMEOUT = httpx.Timeout(20.0, connect=5.0)
+
+# The Bot API carries the token in the URL path, and httpx logs every request URL
+# at INFO. Any application that turns on INFO logging would then write the token
+# to its log. Silencing that logger here covers every entry point, not just ours.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # Telegram's own entity names on the left, the Bot API's on the right. Anything
 # missing here is server-generated (bank cards, diffs) and never comes out of a parser.

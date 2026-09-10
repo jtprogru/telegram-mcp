@@ -94,6 +94,49 @@ A post in someone else's channel can contain instructions aimed at the agent, so
 
 **What code cannot fix:** the session string in the Keychain is a key to the whole account, and any process running as you that gets Keychain access gets Telegram with it. Revoke it in Telegram → Settings → Devices → Terminate session. Automation also formally falls under Telegram's ToS — bulk scraping and mass sending can get an account limited, so the limits in these tools are not decoration.
 
+## Running on a VPS
+
+Two processes, split by which secret each one needs.
+
+The **secretary** is a daemon: it long-polls the Bot API, hands each incoming private message to Claude, and answers through the business connection. Its only credential is the bot token. It has no MTProto session, so it cannot read the channel, other chats or Saved Messages — which is the whole point. An instruction hidden inside an incoming message has no private data to reach and no channel to reach it through: the reply tool takes no chat id, so the worst a hostile message achieves is a foolish answer to its own author.
+
+The **MCP server** is not a daemon at all. Leave it on stdio and start it over ssh, so it runs only while you are connected and nothing listens on a port:
+
+```bash
+claude mcp add -s user telegram-vps -- ssh -q -T vps '/opt/telegram-mcp/.venv/bin/telegram-mcp'
+```
+
+Anything your shell rc files print on the server lands in stdout and corrupts the JSON-RPC stream, so check that `ssh -q -T vps true` prints nothing at all before wiring this up.
+
+### What the secretary is allowed to do
+
+Telegram decides. The rights you grant in Settings → Telegram Business → Chatbots come back on the connection, and the agent is handed one tool per granted right — no grant, no tool, not a refusal at call time. The daemon logs the full set at startup and reloads it whenever the connection changes:
+
+```
+INFO connection granted: can_edit_bio, can_read_messages, can_reply, can_view_gifts_and_stars
+INFO agent may use: can_edit_bio, can_read_messages, can_reply, can_view_gifts_and_stars
+```
+
+Rights that cannot be undone from the outside — transferring Stars or gifts, converting gifts, changing the `@username`, deleting other people's messages — are withheld locally even when Telegram granted them, until `TELEGRAM_SECRETARY_IRREVERSIBLE=1` says otherwise. Telegram's grant is the ceiling and this is the floor; the flag can only narrow, never widen. Note that `transfer_gift` takes a recipient, which makes it the one tool in the set that can send something to a stranger of the model's choosing. That is the reason for the default.
+
+Stories are not covered. `can_manage_stories` grants them, but posting one needs uploaded media, and a half-working implementation of that is worse than none.
+
+### Deploying it
+
+```bash
+git clone <repo> /opt/telegram-mcp && cd /opt/telegram-mcp
+uv sync --no-dev
+install -d -m 700 /etc/telegram-mcp
+cp deploy/secretary.env.example /etc/telegram-mcp/secretary.env   # fill it in, chmod 600
+cp deploy/telegram-secretary.service /etc/systemd/system/
+systemctl enable --now telegram-secretary
+```
+
+The Keychain does not exist on Linux and the code knows it: every secret falls back to an environment variable, which is what the unit's `EnvironmentFile` supplies. Keep `TELEGRAM_MCP_SESSION` out of that file — the secretary has no use for it, and leaving it out is most of what makes this split worth doing.
+
+`make secretary` runs the same daemon in the foreground for a look at the logs. It long-polls, so while it runs it owns the bot's update stream and `make bot-connect` will conflict with it.
+
+
 ## Development
 
 ```bash

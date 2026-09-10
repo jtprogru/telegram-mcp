@@ -6,6 +6,7 @@ readme = "README.md"
 authors = [{ name = "Mikhail Savin", email = "mail@jtprog.ru" }]
 requires-python = ">=3.12,<3.15"
 dependencies = [
+    "anthropic>=0.70",
     "httpx>=0.28",
     "mcp[cli]>=1.2",
     "telethon>=1.44",
@@ -13,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 telegram-mcp = "telegram_mcp.main:main"
+telegram-secretary = "telegram_mcp.secretary:main"
 
 [dependency-groups]
 dev = [

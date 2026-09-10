@@ -131,3 +131,11 @@ async def test_an_unreadable_body_is_still_a_clean_error(bot_api):
 async def test_whoami_returns_the_handle(bot_api):
     bot_api({"ok": True, "result": {"id": 8123456, "username": "MishkaPersonalBot"}})
     assert await botapi.whoami(TOKEN) == "@MishkaPersonalBot"
+
+
+def test_the_http_logger_cannot_write_the_token_to_a_log():
+    """The token lives in the URL path, and httpx logs request URLs at INFO."""
+    import logging
+
+    assert logging.getLogger("httpx").level >= logging.WARNING
+    assert logging.getLogger("httpcore").level >= logging.WARNING

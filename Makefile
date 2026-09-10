@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install lint fmt test ci login bot-connect run clean
+.PHONY: help install lint fmt test ci login bot-connect run secretary clean
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -29,6 +29,9 @@ bot-connect: ## Fetch the connected bot's business connection id into the Keycha
 
 run: ## Run the MCP server on stdio (for manual poking; Claude Code starts it itself)
 	uv run telegram-mcp
+
+secretary: ## Run the business-account secretary daemon in the foreground
+	uv run telegram-secretary
 
 clean: ## Remove venv and tool caches
 	rm -rf .venv .pytest_cache .ruff_cache
