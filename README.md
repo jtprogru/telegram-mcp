@@ -2,7 +2,7 @@
 
 An MCP server that gives an agent read-mostly access to a **personal** Telegram account over MTProto ([Telethon](https://docs.telethon.dev/)). Written in Python, dependencies are managed with [uv](https://docs.astral.sh/uv/).
 
-Bot API cannot do this: a bot sees neither the history of a channel it did not post to, nor private chats, nor Saved Messages. MTProto with a user session can — which is exactly why this server is deliberately small. Seven tools, one of which writes, and that one only to peers named in an allowlist. There is no tool to delete a message, ban a user, leave a chat or edit the profile: they cannot be called because they do not exist here.
+Bot API cannot do this: a bot sees neither the history of a channel it did not post to, nor private chats, nor Saved Messages. MTProto with a user session can — which is exactly why this server is deliberately small. Seven tools, one of which writes, and that one only to peers named in an allowlist — and whatever it sends to a person carries a 🤖 so the recipient can see an agent was involved. There is no tool to delete a message, ban a user, leave a chat or edit the profile: they cannot be called because they do not exist here.
 
 ## Setup
 
@@ -30,7 +30,7 @@ claude mcp add -s user telegram -- uv --directory ~/Work/github/jtprogru/telegra
 
 Use `-s project` instead if the server should only be available inside one project; that writes to `.mcp.json`, which is gitignored here. The first run may show a system dialog asking for Keychain access — that is `security` being called by the server, "Always Allow" is the answer.
 
-If the Keychain is unavailable (a headless launchd run, for example), the same three values are read from `TELEGRAM_MCP_API_ID`, `TELEGRAM_MCP_API_HASH` and `TELEGRAM_MCP_SESSION`.
+If the Keychain is unavailable (a headless launchd run, for example), the same three values are read from `TELEGRAM_MCP_API_ID`, `TELEGRAM_MCP_API_HASH` and `TELEGRAM_MCP_SESSION`. Two more variables tune behaviour rather than access: `TELEGRAM_MCP_SEND_ALLOWLIST` and `TELEGRAM_MCP_AGENT_MARKER`.
 
 ## Tools
 
@@ -41,7 +41,7 @@ If the Keychain is unavailable (a headless launchd run, for example), the same t
 | `tg_history(peer, limit=50, min_id, max_id, since, until, full=False)` | Messages from any peer, `"me"` included |
 | `tg_search(query, peer=None, limit=30)` | Search inside one chat, or globally when `peer` is omitted |
 | `tg_message(link)` | One message by its `t.me/<channel>/<id>` link, untruncated |
-| `tg_send(peer, text, parse_mode="md", link_preview=False)` | Send. Allowlisted peers only |
+| `tg_send(peer, text, parse_mode="md", link_preview=False)` | Send. Allowlisted peers only, and marked when it goes to a person |
 | `tg_download(peer, message_id, dest_dir)` | Save a message's media to disk |
 
 Output is compact on purpose — a channel with thousands of posts would otherwise fill a context window in a single call. One message renders as a header line plus its text, truncated to 500 characters:
@@ -56,6 +56,8 @@ Output is compact on purpose — a channel with thousands of posts would otherwi
 ## Security
 
 **Writes are fenced off in code.** `tg_send` compares the target against `TELEGRAM_MCP_SEND_ALLOWLIST` (default `jtprogru_channel,me`) and refuses anything else with a `PermissionError`, no matter who asks. The check runs before the client is even connected, so it holds when the session is broken too. Widening the list is a config change plus a restart.
+
+**Messages to people are marked as agent-sent.** Anything `tg_send` delivers to a private chat or a group is prefixed with 🤖 before it leaves, so the person reading it can tell how it was written without having to ask. The badge goes in front rather than at the end, where a notification preview would hide it, and it is applied in code — the agent cannot leave it out or talk its way past it. Posts to a broadcast channel are exempt: those are content authored by the channel, not a message from you to someone. Set `TELEGRAM_MCP_AGENT_MARKER` to use something other than 🤖; an empty value falls back to the default instead of switching the marking off.
 
 **Everything that came from someone else is fenced as data:**
 

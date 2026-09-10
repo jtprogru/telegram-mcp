@@ -20,8 +20,10 @@ API_ID_ENV = "TELEGRAM_MCP_API_ID"
 API_HASH_ENV = "TELEGRAM_MCP_API_HASH"
 SESSION_ENV = "TELEGRAM_MCP_SESSION"
 ALLOWLIST_ENV = "TELEGRAM_MCP_SEND_ALLOWLIST"
+AGENT_MARKER_ENV = "TELEGRAM_MCP_AGENT_MARKER"
 
 DEFAULT_SEND_ALLOWLIST = "jtprogru_channel,me"
+DEFAULT_AGENT_MARKER = "🤖"
 
 _KEYCHAIN_TIMEOUT = 15
 
@@ -79,6 +81,15 @@ def parse_allowlist(raw: str | None) -> frozenset[str]:
     """Parse a comma-separated allowlist; an empty value means the default one."""
     source = raw if raw is not None and raw.strip() else DEFAULT_SEND_ALLOWLIST
     return frozenset(normalize_peer(item) for item in source.split(",") if item.strip())
+
+
+def load_marker() -> str:
+    """The badge stamped on every message sent to a person.
+
+    It can be changed, but not switched off: an empty value falls back to the
+    default rather than producing an unmarked message.
+    """
+    return os.environ.get(AGENT_MARKER_ENV, "").strip() or DEFAULT_AGENT_MARKER
 
 
 def load_allowlist() -> frozenset[str]:

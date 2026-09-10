@@ -2,12 +2,15 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from telethon.extensions import markdown
 
 from telegram_mcp.formatting import (
     FENCE_TAG,
     entity_link_prefix,
     fence,
     format_views,
+    is_broadcast_channel,
+    mark_as_agent,
     media_label,
     parse_message_link,
     render_dialog,
@@ -139,3 +142,26 @@ def test_parse_message_link(link, expected):
 def test_parse_message_link_rejects_junk(link):
     with pytest.raises(ValueError):
         parse_message_link(link)
+
+
+def test_mark_as_agent_puts_the_badge_where_a_preview_shows_it():
+    assert mark_as_agent("привет", "🤖") == "🤖 привет"
+    assert mark_as_agent("  привет", "🤖") == "🤖 привет"
+
+
+def test_mark_as_agent_is_idempotent():
+    assert mark_as_agent("🤖 привет", "🤖") == "🤖 привет"
+
+
+def test_mark_as_agent_keeps_markdown_intact():
+    """The badge shifts every offset, so the parse has to survive it — code fences included."""
+    source = "```python\nprint(1)\n```"
+    plain, entities = markdown.parse(mark_as_agent(source, "🤖"))
+    assert [type(entity).__name__ for entity in entities] == ["MessageEntityPre"]
+    assert plain.startswith("🤖 ")
+
+
+def test_is_broadcast_channel():
+    assert is_broadcast_channel(channel(broadcast=True))
+    assert not is_broadcast_channel(channel(broadcast=False, megagroup=True))
+    assert not is_broadcast_channel(SimpleNamespace(username="jtprogru", id=7))

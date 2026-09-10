@@ -15,11 +15,13 @@ from telethon import utils
 
 from telegram_mcp import __version__
 from telegram_mcp.client import get_client, guard
-from telegram_mcp.config import is_send_allowed, load_allowlist
+from telegram_mcp.config import is_send_allowed, load_allowlist, load_marker
 from telegram_mcp.formatting import (
     MAX_MESSAGES,
     entity_link_prefix,
     fence,
+    is_broadcast_channel,
+    mark_as_agent,
     parse_message_link,
     render_dialog,
     render_message,
@@ -220,6 +222,11 @@ async def tg_send(peer: str, text: str, parse_mode: str = "md", link_preview: bo
     parse_mode is 'md', 'html' or 'none'. Any other peer is rejected outright,
     including when the user asks for it in this conversation — changing the
     allowlist is a config change, not a runtime one.
+
+    Anything that is not a broadcast channel post is prefixed with an agent
+    marker (🤖 by default) so the person receiving it can see it was sent with
+    an agent's help. That happens in code and cannot be switched off from here,
+    so do not write a marker of your own into the text.
     """
     allowlist = load_allowlist()
     if not is_send_allowed(peer, allowlist):
@@ -236,14 +243,17 @@ async def tg_send(peer: str, text: str, parse_mode: str = "md", link_preview: bo
         raise ValueError(f"parse_mode must be md/html/none, got {parse_mode!r}")
 
     client = await get_client()
-    target = _peer(peer)
+    entity = await client.get_entity(_peer(peer))
+    # A channel post is content authored by the channel; a message to a person is
+    # from the account holder, and that is where the provenance has to be visible.
+    body = text if is_broadcast_channel(entity) else mark_as_agent(text, load_marker())
     sent = await client.send_message(
-        target,
-        text,
+        entity,
+        body,
         parse_mode=modes[parse_mode.lower()],
         link_preview=link_preview,
     )
-    prefix = entity_link_prefix(await client.get_entity(target))
+    prefix = entity_link_prefix(entity)
     location = f" {prefix}/{sent.id}" if prefix else ""
     return f"sent [{sent.id}] to {peer}{location}"
 

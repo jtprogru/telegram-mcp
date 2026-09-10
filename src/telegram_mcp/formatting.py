@@ -64,6 +64,24 @@ def entity_link_prefix(entity: Any) -> str | None:
     return f"https://t.me/{username}" if username else f"https://t.me/c/{entity.id}"
 
 
+def is_broadcast_channel(entity: Any) -> bool:
+    """True for a channel post, false for anything addressed to people directly."""
+    return bool(getattr(entity, "broadcast", False))
+
+
+def mark_as_agent(text: str, marker: str) -> str:
+    """Stamp an outgoing message so the person reading it knows an agent wrote it.
+
+    The marker goes in front rather than at the end: a trailing signature is
+    invisible in a notification preview, and the point is that nobody has to
+    read to the bottom to find out who they are talking to.
+    """
+    body = text.lstrip()
+    if body.startswith(marker):
+        return body
+    return f"{marker} {body}"
+
+
 def render_message(message: Any, *, link_prefix: str | None = None, full: bool = False, chat: str | None = None) -> str:
     """One message as a header line plus its (by default truncated) text."""
     parts = [f"[{message.id}] {format_datetime(getattr(message, 'date', None))}"]
