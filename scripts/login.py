@@ -15,6 +15,11 @@ from telegram_mcp.config import SESSION_SERVICE, keychain_get, keychain_set, loa
 
 
 async def login() -> None:
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "no terminal attached: Telethon asks for the phone, the code and the 2FA password interactively. "
+            "Run `make login` in a real terminal window, not through a pipe or an agent shell."
+        )
     api_id, api_hash = load_api_credentials()
     if keychain_get(SESSION_SERVICE):
         print(f"A session is already stored in {SESSION_SERVICE}; logging in again replaces it.")

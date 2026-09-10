@@ -15,7 +15,7 @@ security add-generic-password -a "$USER" -s telegram-mcp-api-id   -w "<api_id>"
 security add-generic-password -a "$USER" -s telegram-mcp-api-hash -w "<api_hash>"
 ```
 
-**3. Log in.** Run this yourself in a terminal — it asks for the phone number, the code from Telegram and the 2FA password. The session string goes straight into the Keychain and is never printed.
+**3. Log in.** Run this yourself in a real terminal window — it asks for the phone number, the code from Telegram and the 2FA password, so a piped or agent-driven shell will not do. The session string goes straight into the Keychain and is never printed.
 
 ```bash
 make install
