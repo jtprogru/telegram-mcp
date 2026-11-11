@@ -8,10 +8,28 @@ scrollback and in the agent's transcript.
 import asyncio
 import sys
 
-from telethon import TelegramClient, utils
+from telethon import TelegramClient, types, utils
 from telethon.sessions import StringSession
 
 from telegram_mcp.config import SESSION_SERVICE, keychain_get, keychain_set, load_api_credentials
+
+
+class LoginClient(TelegramClient):
+    """Show the delivery metadata that Telethon's automatic login discards."""
+
+    async def send_code_request(self, phone: str, **kwargs) -> types.auth.SentCode:
+        sent = await super().send_code_request(phone, **kwargs)
+        print(f"Telegram selected code delivery: {type(sent.type).__name__}")
+        if isinstance(sent.type, types.auth.SentCodeTypeApp):
+            print('Check the service chat "Telegram" on an already logged-in device.')
+        elif isinstance(sent.type, types.auth.SentCodeTypeEmailCode):
+            print("Check the login email configured in Telegram.")
+        if sent.next_type is not None:
+            print(f"Next delivery offered by Telegram: {type(sent.next_type).__name__}")
+            if sent.timeout is not None:
+                print(f"Telegram retry timeout: {sent.timeout} seconds")
+        print("Waiting at the code prompt does not resend the code. Press Ctrl+C to abort.")
+        return sent
 
 
 async def login() -> None:
@@ -24,7 +42,7 @@ async def login() -> None:
     if keychain_get(SESSION_SERVICE):
         print(f"A session is already stored in {SESSION_SERVICE}; logging in again replaces it.")
 
-    async with TelegramClient(StringSession(), api_id, api_hash) as client:
+    async with LoginClient(StringSession(), api_id, api_hash) as client:
         me = await client.get_me()
         session = client.session.save()
 
