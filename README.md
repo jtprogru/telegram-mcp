@@ -22,6 +22,19 @@ make install
 make login
 ```
 
+If the login code does not arrive, use QR login from an already logged-in phone:
+
+```bash
+brew install qrencode  # if it is not already installed
+make login-qr
+```
+
+On the phone, open Telegram → Settings → Devices → Link Desktop Device, scan the QR
+code in the terminal and confirm the login. Enter the 2FA password in the terminal
+if requested. Expired QR codes refresh automatically. The existing Keychain session
+is replaced only after a successful login. Keep the QR code private: it authorizes
+the new session.
+
 **4. Register the server with Claude Code:**
 
 ```bash
