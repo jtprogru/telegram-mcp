@@ -232,8 +232,19 @@ async def tg_message(link: str) -> str:
 
 @mcp.tool()
 @guard
-async def tg_send(peer: str, text: str, parse_mode: str = "md", link_preview: bool = False) -> str:
-    """Send a message. Only peers in TELEGRAM_MCP_SEND_ALLOWLIST are accepted.
+async def tg_send(
+    peer: str,
+    text: str,
+    parse_mode: str = "md",
+    link_preview: bool = False,
+    reply_to: int | None = None,
+) -> str:
+    """Send a message or reply. Only peers in TELEGRAM_MCP_SEND_ALLOWLIST are accepted.
+
+    reply_to is a positive message ID in the same peer, as returned by tg_history,
+    tg_search or tg_message. Omit it to send a standalone message. Replies work
+    both through the account directly and through the connected business bot.
+    This replies within the peer; it does not open a channel's discussion group.
 
     parse_mode is 'md', 'html' or 'none'. Any other peer is rejected outright,
     including when the user asks for it in this conversation — changing the
@@ -257,6 +268,8 @@ async def tg_send(peer: str, text: str, parse_mode: str = "md", link_preview: bo
         )
     if not text.strip():
         raise ValueError("text is required")
+    if reply_to is not None and reply_to <= 0:
+        raise ValueError("reply_to must be a positive message ID in the same peer")
 
     modes: dict[str, str | None] = {"md": "md", "markdown": "md", "html": "html", "none": None, "plain": None}
     if parse_mode.lower() not in modes:
@@ -275,11 +288,11 @@ async def tg_send(peer: str, text: str, parse_mode: str = "md", link_preview: bo
     delivery = load_bot_delivery() if is_private_person(entity) else None
     if delivery is not None:
         message_id = await botapi.send_message(
-            delivery.token, delivery.connection_id, entity.id, body, mode, link_preview
+            delivery.token, delivery.connection_id, entity.id, body, mode, link_preview, reply_to=reply_to
         )
         return f"sent [{message_id}] to {peer} through the connected bot, via_business_bot_id set"
 
-    sent = await client.send_message(entity, body, parse_mode=mode, link_preview=link_preview)
+    sent = await client.send_message(entity, body, parse_mode=mode, link_preview=link_preview, reply_to=reply_to)
     prefix = entity_link_prefix(entity)
     location = f" {prefix}/{sent.id}" if prefix else ""
     return f"sent [{sent.id}] to {peer}{location}"

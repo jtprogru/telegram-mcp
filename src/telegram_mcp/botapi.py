@@ -116,8 +116,9 @@ async def send_message(
     text: str,
     parse_mode: str | None,
     link_preview: bool,
+    reply_to: int | None = None,
 ) -> int:
-    """Send on behalf of the connected account and return the new message id."""
+    """Send on behalf of the connected account, optionally replying within chat_id."""
     plain, entities = parse_text(text, parse_mode)
     payload: dict[str, Any] = {
         "business_connection_id": connection_id,
@@ -127,6 +128,8 @@ async def send_message(
     }
     if entities:
         payload["entities"] = entities
+    if reply_to is not None:
+        payload["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": False}
     result = await call(token, "sendMessage", payload)
     return int(result["message_id"])
 

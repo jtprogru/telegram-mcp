@@ -13,6 +13,15 @@ async def test_the_server_exposes_exactly_the_seven_tools():
     assert registered == EXPECTED_TOOLS
 
 
+async def test_tg_send_exposes_an_optional_reply_target():
+    tool = next(tool for tool in await tools.mcp.list_tools() if tool.name == "tg_send")
+    schema = tool.input_schema
+    assert "reply_to" not in schema.get("required", [])
+    assert schema["properties"]["reply_to"]["default"] is None
+    assert {item["type"] for item in schema["properties"]["reply_to"]["anyOf"]} == {"integer", "null"}
+    assert "reply_to" in tool.description
+
+
 async def test_no_destructive_tool_sneaks_in():
     names = " ".join(tool.name for tool in await tools.mcp.list_tools())
     for forbidden in ("delete", "ban", "kick", "leave", "profile", "edit"):

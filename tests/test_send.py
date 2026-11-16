@@ -56,12 +56,15 @@ class FakeClient:
         self.entity = entity
         self.sent = []
         self.bot_sent = []
+        self.replies = []
+        self.bot_replies = []
 
     async def get_entity(self, target):
         return self.entity
 
-    async def send_message(self, entity, text, parse_mode=None, link_preview=False):
+    async def send_message(self, entity, text, parse_mode=None, link_preview=False, reply_to=None):
         self.sent.append((text, parse_mode, link_preview))
+        self.replies.append(reply_to)
         return SimpleNamespace(id=99)
 
 
@@ -75,8 +78,9 @@ def send_to(monkeypatch):
         async def get_client():
             return client
 
-        async def send_via_bot(token, connection_id, chat_id, text, parse_mode, link_preview):
+        async def send_via_bot(token, connection_id, chat_id, text, parse_mode, link_preview, reply_to=None):
             client.bot_sent.append((token, connection_id, chat_id, text, parse_mode, link_preview))
+            client.bot_replies.append(reply_to)
             return 4242
 
         monkeypatch.setattr(tools, "get_client", get_client)
@@ -99,6 +103,7 @@ async def test_tg_send_posts_to_the_channel_unmarked(send_to):
     client = send_to(CHANNEL)
     result = await tools.tg_send("@jtprogru_channel", "hi")
     assert client.sent == [("hi", "md", False)]
+    assert client.replies == [None]
     assert result == "sent [99] to @jtprogru_channel https://t.me/jtprogru_channel/99"
 
 
@@ -128,6 +133,7 @@ async def test_a_message_to_a_person_goes_through_the_connected_bot(send_to):
     client = send_to(PERSON, delivery=DELIVERY, allow=WITH_PERSON)
     result = await tools.tg_send("@ivan", "буду через час")
     assert client.bot_sent == [("123:ABC", "conn-1", 765, "🤖 буду через час", "md", False)]
+    assert client.bot_replies == [None]
     assert client.sent == []
     assert "via_business_bot_id set" in result
 
@@ -179,6 +185,58 @@ async def test_tg_send_rejects_empty_text(send_to):
     client = send_to(SELF)
     with pytest.raises(ValueError, match="text is required"):
         await tools.tg_send("me", "   ")
+    assert client.sent == []
+
+
+@pytest.mark.parametrize("entity, peer", [(SELF, "me"), (CHANNEL, "@jtprogru_channel"), (PERSON, "@ivan")])
+async def test_tg_send_replies_through_the_account(send_to, entity, peer):
+    client = send_to(entity, allow=WITH_PERSON)
+    await tools.tg_send(peer, "ответ", parse_mode="html", link_preview=True, reply_to=512)
+    expected = "ответ" if entity is CHANNEL else "🤖 ответ"
+    assert client.sent == [(expected, "html", True)]
+    assert client.replies == [512]
+    assert client.bot_sent == []
+
+
+async def test_tg_send_replies_through_the_connected_bot(send_to):
+    client = send_to(PERSON, delivery=DELIVERY, allow=WITH_PERSON)
+    await tools.tg_send("@ivan", "ответ", parse_mode="none", reply_to=512)
+    assert client.bot_sent == [("123:ABC", "conn-1", 765, "🤖 ответ", None, False)]
+    assert client.bot_replies == [512]
+    assert client.sent == []
+
+
+@pytest.mark.parametrize("reply_to", [0, -1])
+async def test_tg_send_rejects_invalid_reply_ids_before_connecting(send_to, monkeypatch, reply_to):
+    client = send_to(SELF)
+
+    async def explode():
+        raise AssertionError("invalid reply_to must be rejected before connecting")
+
+    monkeypatch.setattr(tools, "get_client", explode)
+    with pytest.raises(ValueError, match="reply_to must be a positive message ID"):
+        await tools.tg_send("me", "ответ", reply_to=reply_to)
+    assert client.sent == []
+    assert client.bot_sent == []
+
+
+async def test_reply_does_not_bypass_the_allowlist(send_to):
+    client = send_to(PERSON, delivery=DELIVERY)
+    with pytest.raises(PermissionError, match="not allowed"):
+        await tools.tg_send("@ivan", "ответ", reply_to=512)
+    assert client.sent == []
+    assert client.bot_sent == []
+
+
+async def test_a_failed_bot_reply_does_not_fall_back_to_the_account(send_to, monkeypatch):
+    client = send_to(PERSON, delivery=DELIVERY, allow=WITH_PERSON)
+
+    async def fail(*args, **kwargs):
+        raise tools.BotAPIError("sendMessage: Bad Request: message to be replied not found")
+
+    monkeypatch.setattr(tools.botapi, "send_message", fail)
+    with pytest.raises(tools.BotAPIError, match="message to be replied not found"):
+        await tools.tg_send("@ivan", "ответ", reply_to=512)
     assert client.sent == []
 
 

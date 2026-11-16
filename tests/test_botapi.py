@@ -114,6 +114,30 @@ async def test_send_message_omits_entities_when_there_are_none(bot_api):
     assert http.posted[0][1]["link_preview_options"] == {"is_disabled": False}
 
 
+async def test_send_message_includes_reply_parameters(bot_api):
+    http = bot_api({"ok": True, "result": {"message_id": 4242}})
+    message_id = await botapi.send_message(TOKEN, "conn-1", 765, "🤖 **ответ**", "md", False, reply_to=512)
+    assert message_id == 4242
+    payload = http.posted[0][1]
+    assert payload["business_connection_id"] == "conn-1"
+    assert payload["chat_id"] == 765
+    assert payload["text"] == "🤖 ответ"
+    assert payload["entities"] == [{"type": "bold", "offset": 3, "length": 5}]
+    assert payload["reply_parameters"] == {"message_id": 512, "allow_sending_without_reply": False}
+
+
+async def test_send_message_omits_reply_parameters_without_a_target(bot_api):
+    http = bot_api({"ok": True, "result": {"message_id": 1}})
+    await botapi.send_message(TOKEN, "conn-1", 765, "🤖 привет", None, False)
+    assert "reply_parameters" not in http.posted[0][1]
+
+
+async def test_a_missing_reply_target_is_reported(bot_api):
+    bot_api({"ok": False, "description": "Bad Request: message to be replied not found"})
+    with pytest.raises(botapi.BotAPIError, match="message to be replied not found"):
+        await botapi.send_message(TOKEN, "conn-1", 765, "ответ", None, False, reply_to=512)
+
+
 async def test_an_api_error_says_what_went_wrong_without_the_token(bot_api):
     bot_api({"ok": False, "description": "Bad Request: BUSINESS_CONNECTION_INVALID"})
     with pytest.raises(botapi.BotAPIError) as caught:
