@@ -63,7 +63,7 @@ If the Keychain is unavailable (a headless launchd run, for example), the same t
 | `tg_history(peer, limit=50, min_id, max_id, since, until, full=False)` | Messages from any peer, `"me"` included |
 | `tg_search(query, peer=None, limit=30)` | Search inside one chat, or globally when `peer` is omitted |
 | `tg_message(link)` | One message by its `t.me/<channel>/<id>` link, untruncated |
-| `tg_send(peer, text, parse_mode="md", link_preview=False)` | Send. Allowlisted peers only, marked, and routed through the connected bot when there is one |
+| `tg_send(peer, text, parse_mode="md", link_preview=False, reply_to=None)` | Send or reply to a message in the same chat. Allowlisted peers only, marked, and routed through the connected bot when there is one |
 | `tg_download(peer, message_id, dest_dir)` | Save a message's media to disk |
 
 Output is compact on purpose — a channel with thousands of posts would otherwise fill a context window in a single call. One message renders as a header line plus its text, truncated to 500 characters:
@@ -84,6 +84,22 @@ Where a message has an author, the header says who: `from you` for this account,
 ```
 
 `full=True` drops the truncation, and no call ever returns more than 200 messages. To follow a channel incrementally, pass the highest id you already have as `min_id` instead of refetching from the top. All timestamps are UTC, and history comes back oldest first.
+
+### Replying to a message
+
+Pass the positive message ID from `tg_history`, `tg_search` or `tg_message` as
+`reply_to`, using the same `peer` that contains the original message:
+
+```json
+{"peer": "me", "text": "Follow-up to this note", "reply_to": 512}
+```
+
+This is a `tg_send` call. Omit `reply_to` (or pass `null`) for a standalone message.
+Replies work over both MTProto and the connected business bot, with the same
+allowlist and agent marker as ordinary messages. With the business bot, a missing
+reply target is an error rather than a fallback to a standalone message.
+`reply_to` only addresses a message within the selected chat; it does not open
+comments in a channel's linked discussion group.
 
 ## Security
 
