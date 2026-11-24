@@ -3,13 +3,78 @@ package terminal
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
+	"os/exec"
 	"reflect"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/creack/pty"
 	"golang.org/x/term"
 )
+
+// pty.Open's slave is not /dev/tty: on macOS poll works on the former
+// and reports POLLNVAL on the latter. Run Open in a real foreground session.
+func TestSecretFromControllingTTY(t *testing.T) {
+	const helper = "TELEGRAM_MCP_TEST_CTTY"
+	const label = "hidden: "
+	const input = "synthetic-test-password"
+	if os.Getenv(helper) == "1" {
+		ui, err := Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := ui.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		v, err := ui.Secret(t.Context(), label)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v != input {
+			t.Fatal("hidden input mismatch")
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSecretFromControllingTTY$")
+	cmd.Env = append(os.Environ(), helper+"=1")
+	cmd.Stdout = io.Discard // keep test-runner output separate from /dev/tty
+	master, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cmd.Wait(); err != nil {
+			t.Errorf("controlling-terminal prompt failed: %v", err)
+		}
+		if err := master.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	prompt := make([]byte, len(label))
+	if _, err := io.ReadFull(master, prompt); err != nil || string(prompt) != label {
+		t.Fatal("missing password prompt")
+	}
+	if _, err := io.WriteString(master, input+"\r"); err != nil {
+		t.Fatal(err)
+	}
+	// Drain the PTY while the child exits. Linux reports EIO on slave close.
+	var tail strings.Builder
+	if _, err := io.Copy(&tail, master); err != nil && !errors.Is(err, syscall.EIO) {
+		t.Fatal(err)
+	}
+	if tail.String() != "\r\n" {
+		t.Error("hidden input echoed or terminal was not restored")
+	}
+}
 
 func TestSecretHiddenAndRestored(t *testing.T) {
 	for _, tt := range []struct {

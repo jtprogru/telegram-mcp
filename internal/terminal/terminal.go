@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 	"unicode/utf8"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -58,12 +59,15 @@ func (u *UI) ClearQR() error {
 }
 
 // Secret reads without echo, restoring terminal state even on cancellation.
-// Polling bounds cancellation latency without a blocked reader goroutine.
+// Timed readiness checks bound cancellation latency without a reader goroutine.
 func (u *UI) Secret(ctx context.Context, label string) (value string, err error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	fd := int(u.tty.Fd())
+	if fd < 0 || fd >= unix.FD_SETSIZE {
+		return "", errors.New("terminal descriptor is outside the select range")
+	}
 	state, err := term.MakeRaw(fd)
 	if err != nil {
 		return "", errors.New("could not disable terminal echo")
@@ -81,21 +85,23 @@ func (u *UI) Secret(ctx context.Context, label string) (value string, err error)
 	}
 	buf := make([]byte, 0, 128)
 	defer func() { clear(buf[:cap(buf)]) }()
-	poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 	for {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		if _, err := unix.Poll(poll, 100); err != nil {
+		// Darwin poll reports POLLNVAL for the /dev/tty alias even when it
+		// is readable. select supports it; reset both in/out arguments.
+		var read unix.FdSet
+		read.Set(fd)
+		tv := unix.NsecToTimeval((100 * time.Millisecond).Nanoseconds())
+		n, err := unix.Select(fd+1, &read, nil, nil, &tv)
+		if err != nil {
 			if errors.Is(err, unix.EINTR) {
 				continue
 			}
 			return "", errors.New("could not read terminal")
 		}
-		if poll[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
-			return "", errors.New("terminal disconnected")
-		}
-		if poll[0].Revents&unix.POLLIN == 0 {
+		if n == 0 {
 			continue
 		}
 		var b [1]byte
