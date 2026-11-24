@@ -27,6 +27,9 @@ func goFixture(t *testing.T) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Like gotd Client.saveSession on a fresh QR login: the primary DC
+	// and key are persisted, but no explicit address is recorded.
+	data.Addr = ""
 	memory := &session.StorageMemory{}
 	if err := (&session.Loader{Storage: memory}).Save(context.Background(), data); err != nil {
 		t.Fatal(err)

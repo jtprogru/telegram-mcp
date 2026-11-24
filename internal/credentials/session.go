@@ -103,8 +103,12 @@ func validateData(data *session.Data) error {
 	if data.DC < 1 || data.DC > 5 || len(data.AuthKey) != 256 || len(data.AuthKeyID) != 8 {
 		return invalid
 	}
-	if _, _, err := net.SplitHostPort(data.Addr); err != nil {
-		return invalid
+	// Native gotd sessions reconnect by DC and omit Addr. Telethon imports
+	// carry an explicit address; validate it whenever one is present.
+	if data.Addr != "" {
+		if _, _, err := net.SplitHostPort(data.Addr); err != nil {
+			return invalid
+		}
 	}
 	var key crypto.Key
 	copy(key[:], data.AuthKey)
