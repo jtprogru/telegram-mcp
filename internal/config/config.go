@@ -13,8 +13,8 @@ const (
 func NormalizePeer(peer string) string {
 	value := strings.ToLower(strings.TrimSpace(peer))
 	for _, prefix := range []string{"https://t.me/", "http://t.me/", "t.me/"} {
-		if strings.HasPrefix(value, prefix) {
-			value = strings.TrimPrefix(value, prefix)
+		if after, ok := strings.CutPrefix(value, prefix); ok {
+			value = after
 			break
 		}
 	}

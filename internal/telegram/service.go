@@ -114,8 +114,7 @@ func finishOperation(ctx context.Context, tool, result string, operationErr, err
 		if tool == "tg_send" && result != "" && operationErr == nil {
 			return result + "; connection/session teardown failed, do not resend", nil
 		}
-		var public userError
-		if errors.As(operationErr, &public) {
+		if public, ok := errors.AsType[userError](operationErr); ok {
 			return "", public
 		}
 		if errors.Is(operationErr, credentials.ErrUnavailable) {
