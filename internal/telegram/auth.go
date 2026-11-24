@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
@@ -28,6 +30,11 @@ type LoginUI interface {
 // SafeError removes low-level error context which can include RPC inputs.
 // In particular QR tokens, API hashes, session data and passwords must not be logged.
 func SafeError(ctx context.Context, err error) error {
+	return safeTelegramError(ctx, err, "")
+}
+
+// loginStage is a fixed local label, never an RPC message or user input.
+func safeTelegramError(ctx context.Context, err error, loginStage string) error {
 	if err == nil {
 		return nil
 	}
@@ -40,7 +47,14 @@ func SafeError(ctx context.Context, err error) error {
 	if wait, ok := tgerr.AsFloodWait(err); ok {
 		return fmt.Errorf("telegram rate limit: retry after %s", wait)
 	}
-	if errors.Is(err, errUnauthorized) || tgerr.Is(err, "AUTH_KEY_UNREGISTERED", "SESSION_REVOKED", "SESSION_EXPIRED", "AUTH_KEY_DUPLICATED", "USER_DEACTIVATED") {
+	if rpc, ok := tgerr.As(err); ok && rpc.IsOneOf("AUTH_KEY_UNREGISTERED", "SESSION_REVOKED", "SESSION_EXPIRED", "AUTH_KEY_DUPLICATED", "USER_DEACTIVATED") {
+		if loginStage != "" {
+			// Only the allowlisted RPC type above is safe to display.
+			return fmt.Errorf("QR login failed during %s: Telegram returned %s", loginStage, rpc.Type)
+		}
+		err = errUnauthorized
+	}
+	if errors.Is(err, errUnauthorized) {
 		return errors.New("telegram session is no longer usable; stop the Python MCP and run telegram-mcp auth login --qr")
 	}
 	for _, known := range []struct{ code, message string }{
@@ -58,6 +72,27 @@ func SafeError(ctx context.Context, err error) error {
 			return errors.New(known.message)
 		}
 	}
+	if loginStage != "" {
+		if rpc, ok := tgerr.As(err); ok {
+			return fmt.Errorf("QR login failed during %s: Telegram RPC error %d (details suppressed)", loginStage, rpc.Code)
+		}
+		var dns *net.DNSError
+		var netErr net.Error
+		switch {
+		case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, net.ErrClosed):
+			return fmt.Errorf("QR login failed during %s: connection closed", loginStage)
+		case errors.As(err, &dns):
+			return fmt.Errorf("QR login failed during %s: DNS lookup failed", loginStage)
+		case errors.As(err, &netErr):
+			return fmt.Errorf("QR login failed during %s: network error (%T)", loginStage, netErr)
+		}
+		// Type names identify library/decoder failures without printing values.
+		cause := err
+		for next := errors.Unwrap(cause); next != nil; next = errors.Unwrap(cause) {
+			cause = next
+		}
+		return fmt.Errorf("QR login failed during %s: non-RPC error (%T; details suppressed)", loginStage, cause)
+	}
 	return errors.New("telegram operation failed; check connectivity/session and retry explicitly (secret-bearing details suppressed)")
 }
 
@@ -74,21 +109,34 @@ func Login(ctx context.Context, api credentials.API, staged *credentials.Session
 		},
 	})
 	saved := false
+	stage := "connection setup"
 	err := client.Run(ctx, func(ctx context.Context) error {
+		stage = "QR authorization"
 		err := authorizeQR(ctx,
 			func(ctx context.Context) error {
-				_, err := client.QR().Auth(ctx, loggedIn, func(ctx context.Context, token qrlogin.Token) error {
-					return ui.QR(ctx, token.URL())
+				qr := newLoginQR(client.API().Invoker(), api, client.MigrateTo, &stage)
+				_, err := qr.Auth(ctx, loggedIn, func(ctx context.Context, token qrlogin.Token) error {
+					stage = "QR display"
+					if err := ui.QR(ctx, token.URL()); err != nil {
+						return err
+					}
+					stage = "waiting for QR scan"
+					return nil
 				})
+				if tgerr.Is(err, "SESSION_PASSWORD_NEEDED") {
+					stage = "cloud password prompt"
+				}
 				return err
 			},
 			func(ctx context.Context, password string) error {
+				stage = "cloud password verification"
 				_, err := client.Auth().Password(ctx, password)
 				return err
 			}, ui)
 		if err != nil {
 			return err
 		}
+		stage = "account verification"
 		self, err := client.Self(ctx)
 		if err != nil {
 			return err
@@ -96,6 +144,7 @@ func Login(ctx context.Context, api credentials.API, staged *credentials.Session
 		if self.Bot {
 			return errors.New("a user-account session is required, not a bot")
 		}
+		stage = "session save"
 		if err := staged.Commit(ctx); err != nil {
 			return err
 		}
@@ -110,7 +159,7 @@ func Login(ctx context.Context, api credentials.API, staged *credentials.Session
 		if errors.Is(err, credentials.ErrUnavailable) {
 			return errors.New("could not save session in macOS Keychain; login was not saved, previous session is unchanged")
 		}
-		return SafeError(ctx, err)
+		return safeTelegramError(ctx, err, stage)
 	}
 	return clearErr
 }

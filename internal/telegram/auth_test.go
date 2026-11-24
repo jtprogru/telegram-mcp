@@ -57,6 +57,28 @@ func TestAuthorizeQR(t *testing.T) {
 	}
 }
 
+func TestFreshLoginError(t *testing.T) {
+	err := safeTelegramError(context.Background(), &tgerr.Error{Type: "AUTH_KEY_UNREGISTERED", Message: "DO-NOT-PRINT"}, "QR authorization")
+	if !strings.Contains(err.Error(), "QR authorization") || !strings.Contains(err.Error(), "AUTH_KEY_UNREGISTERED") || strings.Contains(err.Error(), "DO-NOT-PRINT") || strings.Contains(err.Error(), "Python") {
+		t.Fatalf("unexpected login diagnostic: %v", err)
+	}
+}
+
+func TestFreshLoginFallback(t *testing.T) {
+	for _, tt := range []struct {
+		err         error
+		stage, want string
+	}{
+		{errors.New("DO-NOT-PRINT"), "session save", "QR login failed during session save"},
+		{&tgerr.Error{Code: 400, Type: "DO-NOT-PRINT", Message: "DO-NOT-PRINT"}, "QR authorization", "QR login failed during QR authorization: Telegram RPC error 400"},
+	} {
+		got := safeTelegramError(context.Background(), tt.err, tt.stage)
+		if got == nil || !strings.Contains(got.Error(), tt.want) || strings.Contains(got.Error(), "DO-NOT-PRINT") {
+			t.Errorf("unexpected fallback diagnostic: %v", got)
+		}
+	}
+}
+
 func TestSafeErrors(t *testing.T) {
 	for _, tt := range []struct {
 		name string
