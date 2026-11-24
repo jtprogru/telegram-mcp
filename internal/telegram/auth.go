@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/auth/qrlogin"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
@@ -131,7 +132,7 @@ func authorizeQR(ctx context.Context, qr func(context.Context) error, password f
 			return err
 		}
 		err = password(ctx, secret)
-		if !tgerr.Is(err, "PASSWORD_HASH_INVALID") {
+		if !errors.Is(err, auth.ErrPasswordInvalid) && !tgerr.Is(err, "PASSWORD_HASH_INVALID") {
 			return err
 		}
 		if err := ui.Message("Incorrect cloud password. Try again, or press Ctrl+C to cancel."); err != nil {

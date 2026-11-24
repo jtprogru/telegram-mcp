@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/tgerr"
 )
 
@@ -45,7 +46,7 @@ func TestAuthorizeQR(t *testing.T) {
 			err := authorizeQR(context.Background(), func(context.Context) error { return tt.qrErr }, func(context.Context, string) error {
 				calls++
 				if calls <= tt.wrong {
-					return &tgerr.Error{Type: "PASSWORD_HASH_INVALID"}
+					return auth.ErrPasswordInvalid
 				}
 				return nil
 			}, ui)
